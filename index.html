@@ -291,6 +291,38 @@
       .how-grid{grid-template-columns:repeat(4,1fr)}
       .detail-meta-grid{grid-template-columns:repeat(4,1fr)}
     }
+
+    /* ── SUPPLIER SETUP WIZARD ── */
+    .setup-wrap{padding:20px 16px;max-width:520px;margin:0 auto}
+    .setup-hero{text-align:center;padding:28px 20px 20px;background:linear-gradient(160deg,var(--navy2),var(--navy));border-bottom:1px solid var(--border)}
+    .setup-hero h2{font-size:22px;font-weight:900;margin-bottom:6px}
+    .setup-hero p{font-size:13px;color:var(--text2)}
+    .setup-progress{display:flex;align-items:center;justify-content:center;gap:0;padding:16px 20px;background:var(--surface);border-bottom:1px solid var(--border)}
+    .sp-step{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;position:relative}
+    .sp-step::after{content:'';position:absolute;top:14px;left:calc(50% + 16px);right:calc(-50% + 16px);height:2px;background:var(--border)}
+    .sp-step:last-child::after{display:none}
+    .sp-dot{width:28px;height:28px;border-radius:50%;background:var(--surface2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text3);position:relative;z-index:1}
+    .sp-step.done .sp-dot{background:var(--green);border-color:var(--green);color:#fff}
+    .sp-step.active .sp-dot{background:var(--amber);border-color:var(--amber);color:#000}
+    .sp-step.done::after{background:var(--green)}
+    .sp-lbl{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+    .sp-step.active .sp-lbl{color:var(--amber)}
+    .sp-step.done .sp-lbl{color:var(--green)}
+    .cat-toggle-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+    .cat-toggle{background:var(--surface2);border:2px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;transition:all .2s;user-select:none}
+    .cat-toggle.sel{border-color:var(--amber);background:rgba(232,160,32,.08);color:var(--amber)}
+    .cat-toggle-icon{font-size:18px}
+    .caps-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .cap-tag{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;transition:all .2s}
+    .cap-tag.sel{background:rgba(232,160,32,.1);border-color:var(--amber);color:var(--amber)}
+    .setup-nav{display:flex;gap:10px;padding:16px 0 4px}
+
+    /* ── DASH PROFILE BANNER ── */
+    .profile-setup-banner{background:linear-gradient(90deg,rgba(232,160,32,.12),transparent);border:1px solid rgba(232,160,32,.3);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;cursor:pointer}
+    .psb-icon{font-size:24px}
+    .psb-text{flex:1}
+    .psb-title{font-size:13px;font-weight:700;color:var(--amber)}
+    .psb-sub{font-size:11px;color:var(--text2)}
   </style>
 </head>
 <body>
@@ -596,6 +628,19 @@
       <div id="dash-activity"></div>
     </div>
     <div style="height:20px"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════ -->
+  <!-- SUPPLIER SETUP VIEW                             -->
+  <!-- ══════════════════════════════════════════════ -->
+  <div id="view-supplier-setup" class="view">
+    <div class="setup-hero">
+      <div style="font-size:36px;margin-bottom:8px">👷</div>
+      <h2>Set Up Your Supplier Profile</h2>
+      <p>Takes 2 minutes — helps us match you to the right tenders</p>
+    </div>
+    <div class="setup-progress" id="setup-progress"></div>
+    <div class="setup-wrap" id="setup-step-content"></div>
   </div>
 
 </div><!-- end #app -->
@@ -992,7 +1037,8 @@ window.doSignup = async function() {
     });
     closeModal('auth-modal');
     toast('✅ Welcome to TenderMatch!');
-    if (selectedAccType==='supplier') showView('dash');
+    if (selectedAccType==='supplier') showSupplierSetup();
+    else showView('dash');
   } catch(e) { toast(e.message.replace('Firebase:','').trim()); }
 };
 window.doSignin = async function() {
@@ -1010,7 +1056,8 @@ window.doGoogleAuth = async function() {
     const cred = await signInWithPopup(auth, googleProvider);
     const userRef = doc(db,'users',cred.user.uid);
     const snap = await getDoc(userRef);
-    if (!snap.exists()) {
+    const isNew = !snap.exists();
+    if (isNew) {
       await setDoc(userRef, {
         name: cred.user.displayName, email: cred.user.email,
         type: selectedAccType, createdAt: serverTimestamp()
@@ -1018,7 +1065,191 @@ window.doGoogleAuth = async function() {
     }
     closeModal('auth-modal');
     toast('✅ Signed in!');
+    // New supplier → profile setup; existing user → dash
+    if (isNew && selectedAccType==='supplier') showSupplierSetup();
+    else showView('dash');
   } catch(e) { toast('Google sign-in failed'); }
+};
+
+// ── Supplier Setup Wizard ─────────────────────────────────────────
+let setupStep = 0;
+let setupData = { bizName:'', abn:'', phone:'', state:'', location:'', categories:[], capabilities:[], description:'', yearsExp:'' };
+
+const SETUP_STEPS = ['Business Info','Categories','About You'];
+const ALL_CAPS = ['Bulk Earthworks','Laser Grading','Dam Construction','Irrigation','Road Formation','Drainage','Concrete Works','Kerb & Channel','Structural Steel','Formwork','Plumbing','Gas Fitting','HVAC','Roofing','Tiling','Painting','Carpentry','Commercial Electrical','HV/LV Works','Solar PV','Data & Comms','Commercial Landscaping','Revegetation','Weed Control','Heavy Haulage','Crane Hire','Demolition','Asbestos Removal','IT Consulting','Software Dev','Cleaning','Catering','Security'];
+
+function renderSetupProgress() {
+  document.getElementById('setup-progress').innerHTML = SETUP_STEPS.map((lbl,i) => {
+    const cls = i < setupStep ? 'done' : i === setupStep ? 'active' : '';
+    return `<div class="sp-step ${cls}"><div class="sp-dot">${i < setupStep ? '✓' : i+1}</div><div class="sp-lbl">${lbl}</div></div>`;
+  }).join('');
+}
+
+function renderSetupStep() {
+  renderSetupProgress();
+  const el = document.getElementById('setup-step-content');
+  const STATES = ['QLD','NSW','VIC','WA','SA','TAS','NT','ACT'];
+  if (setupStep === 0) {
+    el.innerHTML = `
+      <div style="font-size:16px;font-weight:800;margin-bottom:16px;margin-top:4px">Business Details</div>
+      <div class="form-group">
+        <label class="form-label">Business / Trading Name *</label>
+        <input class="form-input" id="ss-bizname" type="text" placeholder="e.g. Smith Earthmoving Pty Ltd" value="${setupData.bizName}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">ABN</label>
+        <input class="form-input" id="ss-abn" type="text" placeholder="12 345 678 901" maxlength="14" value="${setupData.abn}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone</label>
+        <input class="form-input" id="ss-phone" type="tel" placeholder="0400 000 000" value="${setupData.phone}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">State *</label>
+        <select class="form-select" id="ss-state" style="padding:10px 32px 10px 12px">
+          <option value="">Select state…</option>
+          ${STATES.map(s=>`<option value="${s}" ${setupData.state===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">City / Town *</label>
+        <input class="form-input" id="ss-location" type="text" placeholder="e.g. Toowoomba" value="${setupData.location}">
+      </div>
+      <div class="setup-nav">
+        <button class="btn btn-amber" style="flex:1;justify-content:center" onclick="setupNext()">Next: Categories →</button>
+      </div>`;
+  } else if (setupStep === 1) {
+    el.innerHTML = `
+      <div style="font-size:16px;font-weight:800;margin-bottom:4px;margin-top:4px">What do you do?</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:4px">Select all that apply. We'll match you to relevant tenders.</div>
+      <div class="cat-toggle-grid" id="cat-toggle-grid">
+        ${CATEGORIES.map(c => `
+          <div class="cat-toggle ${setupData.categories.includes(c.id)?'sel':''}" onclick="toggleSetupCat('${c.id}',this)">
+            <span class="cat-toggle-icon">${c.emoji}</span>${c.label}
+          </div>`).join('')}
+      </div>
+      <div class="setup-nav">
+        <button class="btn btn-navy" style="justify-content:center" onclick="setupBack()">← Back</button>
+        <button class="btn btn-amber" style="flex:1;justify-content:center" onclick="setupNext()">Next: About You →</button>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div style="font-size:16px;font-weight:800;margin-bottom:4px;margin-top:4px">Tell Us More</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:12px">This shows on your public supplier profile.</div>
+      <div class="form-group">
+        <label class="form-label">Years in Business</label>
+        <select class="form-select" id="ss-exp" style="padding:10px 32px 10px 12px">
+          <option value="">Select…</option>
+          ${['Less than 1 year','1–2 years','3–5 years','6–10 years','10–20 years','20+ years'].map(v=>`<option value="${v}" ${setupData.yearsExp===v?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Brief Description</label>
+        <textarea class="form-textarea" id="ss-desc" rows="4" placeholder="Describe your business, key services, equipment, and what sets you apart…">${setupData.description}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Key Capabilities <span style="color:var(--text3);font-weight:400">(tap to add)</span></label>
+        <div class="caps-tags" id="caps-tags">
+          ${ALL_CAPS.map(c=>`<div class="cap-tag ${setupData.capabilities.includes(c)?'sel':''}" onclick="toggleCap('${c}',this)">${setupData.capabilities.includes(c)?'✓ ':''+ c}</div>`).join('')}
+        </div>
+      </div>
+      <div class="setup-nav">
+        <button class="btn btn-navy" style="justify-content:center" onclick="setupBack()">← Back</button>
+        <button class="btn btn-amber" style="flex:1;justify-content:center" onclick="saveSupplierProfile()">🚀 Create Profile</button>
+      </div>`;
+  }
+}
+
+window.toggleSetupCat = function(id, el) {
+  if (setupData.categories.includes(id)) {
+    setupData.categories = setupData.categories.filter(c=>c!==id);
+    el.classList.remove('sel');
+  } else {
+    setupData.categories.push(id);
+    el.classList.add('sel');
+  }
+};
+
+window.toggleCap = function(cap, el) {
+  if (setupData.capabilities.includes(cap)) {
+    setupData.capabilities = setupData.capabilities.filter(c=>c!==cap);
+    el.classList.remove('sel');
+    el.textContent = cap;
+  } else {
+    setupData.capabilities.push(cap);
+    el.classList.add('sel');
+    el.textContent = '✓ '+cap;
+  }
+};
+
+window.setupNext = function() {
+  if (setupStep === 0) {
+    const biz = document.getElementById('ss-bizname')?.value.trim();
+    const state = document.getElementById('ss-state')?.value;
+    const loc = document.getElementById('ss-location')?.value.trim();
+    if (!biz) { toast('Please enter your business name'); return; }
+    if (!state) { toast('Please select your state'); return; }
+    if (!loc) { toast('Please enter your city/town'); return; }
+    setupData.bizName = biz;
+    setupData.abn = document.getElementById('ss-abn')?.value.trim();
+    setupData.phone = document.getElementById('ss-phone')?.value.trim();
+    setupData.state = state;
+    setupData.location = loc;
+  } else if (setupStep === 1) {
+    if (setupData.categories.length === 0) { toast('Please select at least one category'); return; }
+  }
+  setupStep++;
+  document.getElementById('app').scrollTop = 0;
+  renderSetupStep();
+};
+
+window.setupBack = function() {
+  if (setupStep > 0) { setupStep--; renderSetupStep(); }
+};
+
+window.showSupplierSetup = function() {
+  setupStep = 0;
+  setupData = { bizName:'', abn:'', phone:'', state:'', location:'', categories:[], capabilities:[], description:'', yearsExp:'' };
+  showView('supplier-setup');
+  renderSetupStep();
+};
+
+window.saveSupplierProfile = async function() {
+  const desc = document.getElementById('ss-desc')?.value.trim();
+  const exp = document.getElementById('ss-exp')?.value;
+  if (!desc) { toast('Please add a brief description'); return; }
+  setupData.description = desc;
+  setupData.yearsExp = exp;
+
+  try {
+    const uid = currentUser.uid;
+    const initials = setupData.bizName.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    await setDoc(doc(db,'suppliers',uid), {
+      name: setupData.bizName,
+      abn: setupData.abn,
+      phone: setupData.phone,
+      state: setupData.state,
+      location: setupData.location,
+      categories: setupData.categories,
+      capabilities: setupData.capabilities,
+      description: setupData.description,
+      yearsExp: setupData.yearsExp,
+      initials,
+      verified: false,
+      rating: 0,
+      reviews: 0,
+      jobsCompleted: 0,
+      totalValue: '$0',
+      certs: [],
+      reviewItems: [],
+      userId: uid,
+      createdAt: serverTimestamp()
+    });
+    // Update user profile type
+    await setDoc(doc(db,'users',uid), { type:'supplier' }, { merge:true });
+    toast('🎉 Profile created! Welcome to TenderMatch!');
+    showView('dash');
+  } catch(e) { toast('Error saving profile: ' + e.message); }
 };
 
 // ── Navigation ────────────────────────────────────────────────────
@@ -1040,6 +1271,8 @@ window.showView = function(viewId, pushHistory=true) {
   if (viewId==='profile-public') renderSupplierList();
   if (viewId==='dash') renderDash();
   if (viewId==='home') renderHome();
+  // Hide bottom nav during setup wizard
+  document.getElementById('botnav').style.display = viewId==='supplier-setup' ? 'none' : '';
 };
 
 window.goBack = function() {
@@ -1246,8 +1479,9 @@ window.submitBid = async function() {
   const msg = document.getElementById('bid-message').value.trim();
   if (!msg) { toast('Please write a cover message'); return; }
   try {
-    await setDoc(doc(db,'tenders',activeTenderId,'bids',currentUser.uid), {
-      userId: currentUser.uid, name: currentUser.displayName||'Supplier',
+    await setDoc(doc(db,'bids',currentUser.uid+'_'+activeTenderId), {
+      userId: currentUser.uid, name: currentUser.displayName||userProfile?.name||'Supplier',
+      tenderId: activeTenderId,
       message: msg, price: document.getElementById('bid-price').value,
       submittedAt: serverTimestamp(), status: 'submitted'
     });
@@ -1426,38 +1660,97 @@ window.openSupplier = function(id) {
 };
 
 // ── Dashboard ─────────────────────────────────────────────────────
-function renderDash() {
+async function renderDash() {
   if (!currentUser) { showView('home'); return; }
   const name = currentUser.displayName || userProfile?.name || 'there';
-  document.getElementById('dash-welcome').textContent = `Welcome back, ${name}`;
+  document.getElementById('dash-welcome').textContent = `Welcome back, ${name.split(' ')[0]}`;
+
+  // Load real bid data
+  let myBids = [];
+  try {
+    const bSnap = await getDocs(query(collection(db,'bids'), where('userId','==',currentUser.uid)));
+    myBids = bSnap.docs.map(d=>({id:d.id,...d.data()}));
+  } catch(e) {}
+
+  // Check if supplier profile exists
+  const supplierProfile = allSuppliers.find(s => s.id === currentUser.uid || s.userId === currentUser.uid);
+
+  // Calculate profile completeness
+  let profilePct = 30; // base: logged in
+  if (supplierProfile) {
+    if (supplierProfile.name) profilePct += 15;
+    if (supplierProfile.abn) profilePct += 10;
+    if (supplierProfile.categories?.length) profilePct += 15;
+    if (supplierProfile.description) profilePct += 15;
+    if (supplierProfile.capabilities?.length) profilePct += 10;
+    if (supplierProfile.phone) profilePct += 5;
+  }
+  profilePct = Math.min(100, profilePct);
+
+  const activeBids = myBids.filter(b => b.status !== 'won' && b.status !== 'lost').length;
+  const wonBids = myBids.filter(b => b.status === 'won').length;
+
   // Stats
   document.getElementById('dash-stats').innerHTML = `
-    <div class="stat-card amber"><div class="stat-card-num">3</div><div class="stat-card-lbl">Active Bids</div></div>
-    <div class="stat-card green"><div class="stat-card-num">1</div><div class="stat-card-lbl">Tenders Won</div></div>
-    <div class="stat-card"><div class="stat-card-num">12</div><div class="stat-card-lbl">Tenders Viewed</div></div>
-    <div class="stat-card"><div class="stat-card-num">87%</div><div class="stat-card-lbl">Profile Complete</div></div>`;
-  // Bids
-  document.getElementById('dash-bids').innerHTML = `
-    <div class="bid-status-row" onclick="openTender('t1')">
-      <div class="bsr-left"><div class="bsr-title">Earthworks & Site Preparation — Industrial Estate</div><div class="bsr-issuer">Toowoomba Regional Council · QLD</div></div>
-      <span class="status-pill sp-submitted">Submitted</span>
-    </div>
-    <div class="bid-status-row" onclick="openTender('t3')">
-      <div class="bsr-left"><div class="bsr-title">Subcontract — Concrete Works for Retail Precinct</div><div class="bsr-issuer">Buildcorp Queensland · QLD</div></div>
-      <span class="status-pill sp-pending">Pending</span>
-    </div>
-    <div class="bid-status-row" onclick="openTender('t5')">
-      <div class="bsr-left"><div class="bsr-title">Dam Repair & Irrigation Bay Regrading</div><div class="bsr-issuer">Private — Banksia Springs Farm · QLD</div></div>
-      <span class="status-pill sp-won">Shortlisted</span>
-    </div>`;
-  // Recommended
-  const myTenders = (allTenders.length?allTenders:SEED_TENDERS).slice(0,2);
-  document.getElementById('dash-recommended').innerHTML = myTenders.map(renderTenderCard).join('');
-  // Activity
-  document.getElementById('dash-activity').innerHTML = `
-    <div class="activity-item"><div class="activity-dot dot-green"></div><div class="activity-text">Your EOI for <strong>Earthworks — Industrial Estate</strong> was viewed by the issuer</div><div class="activity-time">2h ago</div></div>
-    <div class="activity-item"><div class="activity-dot dot-amber"></div><div class="activity-text">New tender matching your profile: <strong>Dam Repair — Scenic Rim</strong></div><div class="activity-time">5h ago</div></div>
-    <div class="activity-item"><div class="activity-dot dot-blue"></div><div class="activity-text">Q&A response posted on <strong>Industrial Estate Stage 2</strong></div><div class="activity-time">1d ago</div></div>`;
+    <div class="stat-card amber"><div class="stat-card-num">${activeBids}</div><div class="stat-card-lbl">Active Bids</div></div>
+    <div class="stat-card green"><div class="stat-card-num">${wonBids}</div><div class="stat-card-lbl">Tenders Won</div></div>
+    <div class="stat-card"><div class="stat-card-num">${myBids.length}</div><div class="stat-card-lbl">Total EOIs</div></div>
+    <div class="stat-card"><div class="stat-card-num">${profilePct}%</div><div class="stat-card-lbl">Profile Complete</div></div>`;
+
+  // Profile setup nudge
+  const bidsEl = document.getElementById('dash-bids');
+  if (!supplierProfile && userProfile?.type === 'supplier') {
+    bidsEl.innerHTML = `
+      <div class="profile-setup-banner" onclick="showSupplierSetup()">
+        <div class="psb-icon">⚡</div>
+        <div class="psb-text">
+          <div class="psb-title">Complete your supplier profile</div>
+          <div class="psb-sub">Get matched to tenders automatically — takes 2 minutes</div>
+        </div>
+        <div style="color:var(--amber);font-size:18px">›</div>
+      </div>` + (myBids.length ? '' : '<div class="empty" style="padding:30px 16px"><div class="empty-icon" style="font-size:32px">📩</div><p>No EOIs yet. Browse open tenders and express interest!</p></div>');
+  } else if (myBids.length === 0) {
+    bidsEl.innerHTML = '<div class="empty" style="padding:30px 16px"><div class="empty-icon" style="font-size:32px">📩</div><p>No active bids yet. Browse tenders and submit your first EOI.</p></div>';
+  } else {
+    bidsEl.innerHTML = myBids.slice(0,5).map(b => {
+      const tender = allTenders.find(t=>t.id===b.tenderId) || {};
+      const statusCls = b.status==='won'?'sp-won':b.status==='shortlisted'?'sp-won':'sp-submitted';
+      const statusLabel = b.status ? b.status.charAt(0).toUpperCase()+b.status.slice(1) : 'Submitted';
+      return `<div class="bid-status-row" onclick="openTender('${b.tenderId}')">
+        <div class="bsr-left"><div class="bsr-title">${tender.title||'Tender'}</div><div class="bsr-issuer">${tender.issuer||''} ${tender.state?'· '+tender.state:''}</div></div>
+        <span class="status-pill ${statusCls}">${statusLabel}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Recommended tenders (match by supplier categories if known)
+  const tenders = allTenders.length ? allTenders : SEED_TENDERS;
+  let recommended = tenders.filter(t=>t.status==='open');
+  if (supplierProfile?.categories?.length) {
+    const matched = recommended.filter(t => supplierProfile.categories.includes(t.category));
+    recommended = matched.length ? matched : recommended;
+  }
+  document.getElementById('dash-recommended').innerHTML = recommended.slice(0,3).map(renderTenderCard).join('') ||
+    '<div class="empty" style="padding:20px"><p>No open tenders right now.</p></div>';
+
+  // Activity — show recent EOIs or general activity
+  if (myBids.length > 0) {
+    document.getElementById('dash-activity').innerHTML = myBids.slice(0,3).map(b => {
+      const tender = allTenders.find(t=>t.id===b.tenderId);
+      const when = b.submittedAt?.toDate ? timeAgo(b.submittedAt.toDate()) : 'recently';
+      return `<div class="activity-item"><div class="activity-dot dot-amber"></div><div class="activity-text">EOI submitted for <strong>${tender?.title||'a tender'}</strong></div><div class="activity-time">${when}</div></div>`;
+    }).join('');
+  } else {
+    document.getElementById('dash-activity').innerHTML = `
+      <div class="activity-item"><div class="activity-dot dot-blue"></div><div class="activity-text">Welcome to TenderMatch! Browse open tenders to get started.</div><div class="activity-time">Now</div></div>`;
+  }
+}
+
+function timeAgo(date) {
+  const secs = Math.floor((Date.now() - date) / 1000);
+  if (secs < 3600) return Math.floor(secs/60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs/3600) + 'h ago';
+  return Math.floor(secs/86400) + 'd ago';
 }
 
 // ── Toast ─────────────────────────────────────────────────────────
